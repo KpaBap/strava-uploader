@@ -1,5 +1,27 @@
 from pyudev import Context, Monitor, MonitorObserver
-import re, glob, time
+import re, glob, time, json, urllib.request, cherrypy, threading, sqlite3, sys
+
+def startup():
+    strava_client_secret = "2ddc808e59ae9d4532235f78cf72fa7da9fa649d"
+    strava_client_id = "1451"
+    web_port = 9090
+
+    observer = MonitorObserver(monitor, callback=find_garmin, name='monitor-observer')
+    observer.daemon = True
+    observer.start()
+
+    request_json.token = strava_get_token()
+
+    if not request_json.token:
+        ##Disable cherrypy logging to stdout, bind to all IPs, start in a separate thread
+        cherrypy.log.screen=False
+        cherrypy.server.socket_host = "0.0.0.0"
+
+        cherrypy.server.socket_port = web_port
+
+        thread = threading.Thread(target=cherrypy.quickstart, args=(Root(),))
+        thread.start()
+
 
 context = Context()
 monitor = Monitor.from_netlink(context)
@@ -64,10 +86,64 @@ def find_fits(partition):
     
     
 
+def request_json(url):
+    headers = {'Authorization': 'access_token ' + request_json.token}
+    req = urllib.request.Request(url, None, headers)
+    response = urllib.request.urlopen(req)
+    response = json.loads(response.read().decode('utf-8'))
+    return response
 
+def strava_insert_token(token):
+    """ Insert a user's strava token into the token table """
+    conn = sqlite3.connect('strava.sqlite')
+    c = conn.cursor()
+    query = "INSERT INTO tokens VALUES (:token)"
+    c.execute(query, {'token': token})
+    conn.commit()
+    c.close()
+
+def strava_get_token():
+    """ Get an token by user """
+    conn = sqlite3.connect('strava.sqlite')
+    c = conn.cursor()
+    query = "SELECT token FROM tokens"
     
+    try:
+        result = c.execute(query).fetchone()
+    except:
+        return False
+    if (result):
+        c.close()
+        return result[0]
+    else:
+        c.close()
+        return False
+    
+def strava_delete_token(token):
+    """ Delete a user's token from the token table """
+    conn = sqlite3.connect('strava.sqlite')
+    c = conn.cursor()
+    query = "DELETE FROM tokens WHERE token = :token"
+    c.execute(query, {'token': token})
+    conn.commit()
+    c.close()
 
-observer = MonitorObserver(monitor, callback=find_garmin, name='monitor-observer')
-observer.daemon = False
 
-observer.start()
+class Root:
+    @cherrypy.expose
+    def strava_request_access(self):
+        return """
+                You've reached the Strava answering machine, leave a message after the beep.
+                """
+
+
+def main_loop():
+    startup()
+    while 1:
+        time.sleep(0.1)
+
+if __name__ == "__main__":
+    try: 
+        main_loop()
+    except KeyboardInterrupt:
+        sys.exit(0)
