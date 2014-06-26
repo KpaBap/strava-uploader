@@ -2,8 +2,8 @@ from pyudev import Context, Monitor, MonitorObserver
 import re, glob, time, json, urllib.request, cherrypy, threading, sqlite3, sys
 
 def startup():
-    strava_client_secret = "2ddc808e59ae9d4532235f78cf72fa7da9fa649d"
-    strava_client_id = "1451"
+    strava_client_secret = "blahblah"
+    strava_client_id = "0"
     web_port = 9090
 
     observer = MonitorObserver(monitor, callback=find_garmin, name='monitor-observer')
