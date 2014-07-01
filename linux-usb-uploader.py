@@ -2,11 +2,12 @@ from pyudev import Context, Monitor, MonitorObserver
 import re, glob, time, json, urllib.request, urllib.parse, cherrypy, threading, sqlite3, sys, webbrowser, os, requests
 
 def startup():
-    strava_client_secret = "blahblah"
-    strava_client_id = "12345"
+    strava_client_secret = "blah blah blah"
+    strava_client_id = "0000"
     web_port = 9090
 
-
+    sys.stdout = simpleLogger("strava-upload.log")
+    sys.stderr = simpleLogger("strava-upload-errors.log")
 
     upload_fits.token = strava_get_token()
 
@@ -53,7 +54,8 @@ def strava_oauth_exchange(strava_client_secret,strava_client_id, web_port):
     webbrowser.open_new_tab(strava_oauth_url)
 
     ##Disable cherrypy logging to stdout, bind to all IPs, start in a separate thread
-    cherrypy.log.screen=True
+    cherrypy.engine.autoreload.on = False
+    cherrypy.log.screen=False
     cherrypy.server.socket_host = "0.0.0.0"
     cherrypy.server.socket_port = web_port
     cherrypy.quickstart(webServer(strava_client_secret,strava_client_id))
@@ -72,23 +74,20 @@ def find_garmin(device):
                     model = parent_dev.attributes['model']
                     if model == b'Edge 800 SD Card':
                         print("Edge 800 SD card partition found: %s" % partition)
-                        print("Waiting for the slow ass Garmin to get mounted", end="",flush=True)
+                        print("Waiting for the slow ass Garmin to get mounted", flush=True)
 
                         time_start = time.time()
 
-                        while(fit_dir==False):
-                            print('.',end="",flush=True)    
+                        while(fit_dir==False):                            
                             fit_dir = find_fits(partition)
-                            if time.time() - time_start > 45:
+                            if time.time() - time_start > 90:
                                 print("timed out!")
                                 break
                             else:
                                 time.sleep(1)
-                            
-                        
-    
+
                     if fit_dir:
-                        print ("\nFound .fit directory: %s" % fit_dir)
+                        print ("Found .fit directory: %s" % fit_dir)
                         print ("Using Strava token: %s" % upload_fits.token)
                         upload_fits(fit_dir)
                         return
@@ -227,12 +226,12 @@ def store_filename(filename):
 def hasbeen_uploaded(filename):
     conn = sqlite3.connect('uploads.sqlite')
     c = conn.cursor()
-    try:
-        result = c.execute("SELECT filename FROM uploads WHERE filename = ?", [filename]).fetchall()
-    except:
+    result = len(c.execute("SELECT filename FROM uploads WHERE filename = ?", (filename,)).fetchall())
+
+    if result > 0:    
+        return True
+    else:
         return False
-    
-    return True
     
  
 def upload_fits(fit_dir):
@@ -255,7 +254,7 @@ def upload_fits(fit_dir):
             if upload_id:
                 thread = threading.Thread(target=get_upload_status, args=(upload_fits.token,upload_id, filename))
                 thread.start()
-        while threading.activeCount() > 1: # wait for all files to finish processing
+        while threading.activeCount() > 2: # wait for all files to finish processing
             pass
     else: #nothing to upload
         print ("Nothing to upload.")
@@ -294,17 +293,37 @@ def get_upload_status(token, upload_id, filename):
         error = res.json()['error']
         
         if error:
-            print("Error on %s: %s" % (filename,error))
+            print("Error: %s" % error)
+            if error.find("duplicate") != -1:
+                store_filename(os.path.basename(filename))
             return
         elif status == "Your activity is ready.":
             
             store_filename(os.path.basename(filename))
         
-            print("%s successfully uploaded and processed in %s seconds." % (filename,round(time.time()-start_time,2)))
+            print("%s successfully uploaded and processed in %s seconds." % (os.path.basename(filename),round(time.time()-start_time,2)))
             return
         
         time.sleep(1)
 
+#override print function to add timestamps
+def print(s, **kwargs):
+    __builtins__.print(time.strftime("[%b %d %H:%M:%S] ") + s, **kwargs)
+
+class simpleLogger():
+    
+    def __init__(self,logfile):
+        self.logfile = logfile
+        open(logfile,"w").write("") ##clear out any previous contents
+    
+    def write(self,logtext):
+        logfile = open(self.logfile,"a")
+        logfile.write(logtext)
+        logfile.close()
+        return 0
+    
+    def flush(self):
+        return 0
 
 
 
