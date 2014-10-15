@@ -1,9 +1,9 @@
 from pyudev import Context, Monitor, MonitorObserver
-import re, glob, time, json, urllib.request, urllib.parse, cherrypy, threading, sqlite3, sys, webbrowser, os, requests
+import re, glob, time, json, urllib.request, urllib.parse, cherrypy, threading, sqlite3, sys, webbrowser, os, requests, subprocess
 
 def startup():
-    strava_client_secret = "blah blah blah"
-    strava_client_id = "0000"
+    strava_client_secret = "1234abcde"
+    strava_client_id = "0"
     web_port = 9090
 
     sys.stdout = simpleLogger("strava-upload.log")
@@ -74,29 +74,51 @@ def find_garmin(device):
                     model = parent_dev.attributes['model']
                     if model == b'Edge 800 SD Card':
                         print("Edge 800 SD card partition found: %s" % partition)
-                        print("Waiting for the slow ass Garmin to get mounted", flush=True)
-
-                        time_start = time.time()
-
+                        print("Waiting for the slow ass Garmin to get mounted")
+                        #Attempt to mount the SDCARD partition and keep trying to find the .fit files
+                        #Doing this in a loop because the SDCARD may get auto mounted before we mount it 
+                        #We keep checking if the .fit files exist regardless of how it got mounted
                         while(fit_dir==False):                            
-                            fit_dir = find_fits(partition)
-                            if time.time() - time_start > 90:
-                                print("timed out!")
-                                break
+                            fit_dir = find_fits(partition) 
+                            try:
+                                if mount_sdcard(partition):   
+                                    fit_dir = find_fits(partition)                             
+                                    break
+
+                            except:
+                                raise
                             else:
                                 time.sleep(1)
 
                     if fit_dir:
                         print ("Found .fit directory: %s" % fit_dir)
                         print ("Using Strava token: %s" % upload_fits.token)
-                        upload_fits(fit_dir)
+                        upload_fits(fit_dir, partition)
                         return
                 except:
                     pass
     except:
         return False
 
+def mount_sdcard(partition):
+    tmpdir = '/tmp/strava-upload-sdcard'
 
+    if not os.path.exists(tmpdir):
+        print("Creating temporary mount directory")
+        mkdir_result = subprocess.call(['mkdir %s' % tmpdir], shell=True)
+        if mkdir_result != 0:
+            print ("Failed to create directory: %s" % tmpdir)
+            return False
+        
+    print ("Attempting to mount SDCARD partition (%s)" % partition)
+    mount_result = subprocess.call(['mount /dev/%s %s' % (partition, tmpdir)], shell=True)
+    if mount_result != 0:
+        print ("Failed to mount /dev/%s - probably don't have permissions to" % partition)
+        return False
+
+    return True
+    
+        
 
 def find_fits(partition):
     re_mnt = re.compile("%s\s(.*?)\s" % partition)
@@ -234,7 +256,7 @@ def hasbeen_uploaded(filename):
         return False
     
  
-def upload_fits(fit_dir):
+def upload_fits(fit_dir, partition):
     
     skipped = 0
     upload_files = []
@@ -256,11 +278,16 @@ def upload_fits(fit_dir):
                 thread.start()
         while threading.activeCount() > 2: # wait for all files to finish processing
             pass
+
     else: #nothing to upload
         print ("Nothing to upload.")
     
     print ("%s files skipped." % skipped)
-           
+    #unmount the SD card partition
+    print ("Unmounting SD card: /dev/%s" % partition)
+    unmount_result = subprocess.call(['umount /dev/%s' % partition], shell=True)
+    if mount_result != 0:
+        print ("Failed to unmount /dev/%s - probably don't have permissions to" % partition)       
 
 
 def upload_fit_file(token, fitfile):
